@@ -578,254 +578,270 @@
         </main>
     </div>
 
-    <script>
-        // Variables globales
-        let transactions = [];
-        let filteredTransactions = [];
+<script type="module">
+  // Importar las funciones necesarias de Firebase
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.8.1/firebase-app.js";
+  import {
+    getFirestore,
+    collection,
+    addDoc,
+    getDocs,
+    deleteDoc,
+    doc,
+    query,
+    orderBy
+  } from "https://www.gstatic.com/firebasejs/11.8.1/firebase-firestore.js";
 
-        // Inicialización
-        document.addEventListener('DOMContentLoaded', function () {
-            loadTransactions();      // ← esta sí recupera desde localStorage
-            setTodayDate();
-            setupEventListeners();
-            applyFilters();          // ← renderiza inmediatamente el historial
-            updateSummary();
-        });
+  // Configuración de Firebase
+  const firebaseConfig = {
+    apiKey: "AIzaSyDoQBZaiQCMy0YyWOrrhK4THMZ3c5egGdE",
+    authDomain: "control-gastos-18f4a.firebaseapp.com",
+    projectId: "control-gastos-18f4a",
+    storageBucket: "control-gastos-18f4a.appspot.com",
+    messagingSenderId: "641333172544",
+    appId: "1:641333172544:web:8d7e4059eb6e38256142a5"
+  };
 
+  // Inicializar Firebase
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  const transactionsCollection = collection(db, "transacciones");
 
-        // Configurar fecha de hoy por defecto
-        function setTodayDate() {
-            const today = new Date().toISOString().split('T')[0];
-            document.getElementById('date').value = today;
-        }
+  // Variables globales
+  let transactions = [];
+  let filteredTransactions = [];
 
-        // Configurar event listeners
-        function setupEventListeners() {
-            document.getElementById('transaction-form').addEventListener('submit', addTransaction);
-            document.getElementById('filter-type').addEventListener('change', applyFilters);
-            document.getElementById('filter-category').addEventListener('change', applyFilters);
-            document.getElementById('filter-month').addEventListener('change', applyFilters);
-        }
+  // Inicialización
+  document.addEventListener('DOMContentLoaded', async function () {
+    await loadTransactions();
+    setTodayDate();
+    setupEventListeners();
+    applyFilters();
+    updateSummary();
+  });
 
-        // Cargar transacciones desde memoria
-        function loadTransactions() {
-    const stored = localStorage.getItem('transactions');
-    transactions = stored ? JSON.parse(stored) : [];
+  // Configurar fecha de hoy por defecto
+  function setTodayDate() {
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('date').value = today;
+  }
+
+  // Configurar event listeners
+  function setupEventListeners() {
+    document.getElementById('transaction-form').addEventListener('submit', addTransaction);
+    document.getElementById('filter-type').addEventListener('change', applyFilters);
+    document.getElementById('filter-category').addEventListener('change', applyFilters);
+    document.getElementById('filter-month').addEventListener('change', applyFilters);
+  }
+
+  // Cargar transacciones desde Firestore
+  async function loadTransactions() {
+    const q = query(transactionsCollection, orderBy("date", "desc"));
+    const querySnapshot = await getDocs(q);
+    transactions = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     filteredTransactions = [...transactions];
-}
+  }
 
+  // Agregar nueva transacción
+  async function addTransaction(e) {
+    e.preventDefault();
 
-        // Guardar transacciones (simulado)
-        function saveTransactions() {
-            // En un entorno real, aquí se guardaría en localStorage o base de datos
-            console.log('Transacciones guardadas:', transactions);
+    const amount = parseFloat(document.getElementById('amount').value);
+    const description = document.getElementById('description').value.trim();
+    const category = document.getElementById('category').value;
+    const type = document.getElementById('type').value;
+    const date = document.getElementById('date').value;
+
+    if (!amount || !description || !category || !type || !date) {
+      alert('Por favor, complete todos los campos');
+      return;
+    }
+
+    const transaction = {
+      amount: type === 'gasto' ? -Math.abs(amount) : Math.abs(amount),
+      description,
+      category,
+      type,
+      date
+    };
+
+    try {
+      const docRef = await addDoc(transactionsCollection, transaction);
+      transactions.unshift({ id: docRef.id, ...transaction });
+      e.target.reset();
+      setTodayDate();
+      applyFilters();
+      updateSummary();
+      showSuccessMessage('Transacción agregada exitosamente');
+    } catch (error) {
+      console.error("Error al agregar la transacción: ", error);
+    }
+  }
+
+  // Eliminar transacción
+  async function deleteTransaction(id) {
+    if (confirm('¿Estás seguro de que deseas eliminar esta transacción?')) {
+      try {
+        await deleteDoc(doc(db, "transacciones", id));
+        transactions = transactions.filter(t => t.id !== id);
+        applyFilters();
+        updateSummary();
+        showSuccessMessage('Transacción eliminada');
+      } catch (error) {
+        console.error("Error al eliminar la transacción: ", error);
+      }
+    }
+  }
+
+  // Aplicar filtros
+  function applyFilters() {
+    const typeFilter = document.getElementById('filter-type').value;
+    const categoryFilter = document.getElementById('filter-category').value;
+    const monthFilter = document.getElementById('filter-month').value;
+
+    filteredTransactions = transactions.filter(transaction => {
+      const matchesType = !typeFilter || transaction.type === typeFilter;
+      const matchesCategory = !categoryFilter || transaction.category === categoryFilter;
+      const matchesMonth = !monthFilter || transaction.date.startsWith(monthFilter);
+      return matchesType && matchesCategory && matchesMonth;
+    });
+
+    renderTransactions();
+  }
+
+  // Renderizar transacciones
+  function renderTransactions() {
+    const tbody = document.getElementById('transactions-body');
+    const noTransactions = document.getElementById('no-transactions');
+
+    if (filteredTransactions.length === 0) {
+      tbody.innerHTML = '';
+      noTransactions.style.display = 'block';
+      return;
+    }
+
+    noTransactions.style.display = 'none';
+    tbody.innerHTML = '';
+
+    filteredTransactions.forEach(transaction => {
+      const row = document.createElement('tr');
+      row.className = 'fade-in';
+
+      const categoryEmoji = getCategoryEmoji(transaction.category);
+      const typeClass = transaction.type === 'ingreso' ? 'type-ingreso' : 'type-gasto';
+      const amountClass = transaction.amount >= 0 ? 'amount-positive' : 'amount-negative';
+
+      row.innerHTML = `
+        <td>${formatDate(transaction.date)}</td>
+        <td><span class="type-badge ${typeClass}">${transaction.type}</span></td>
+        <td>${categoryEmoji} ${transaction.category}</td>
+        <td>${transaction.description}</td>
+        <td class="${amountClass}">S/ ${Math.abs(transaction.amount).toFixed(2)}</td>
+        <td>
+          <button class="btn btn-delete" onclick="deleteTransaction('${transaction.id}')">
+            <i class="fas fa-trash"></i>
+          </button>
+        </td>
+      `;
+
+      tbody.appendChild(row);
+    });
+  }
+
+  // Actualizar resumen
+  function updateSummary() {
+    const currentMonth = new Date().toISOString().slice(0, 7);
+
+    let monthlyIncome = 0;
+    let monthlyExpense = 0;
+    let totalBalance = 0;
+    let expenseAmounts = [];
+
+    transactions.forEach(transaction => {
+      const transactionMonth = transaction.date.slice(0, 7);
+
+      totalBalance += transaction.amount;
+
+      if (transactionMonth === currentMonth) {
+        if (transaction.amount > 0) {
+          monthlyIncome += transaction.amount;
+        } else {
+          monthlyExpense += Math.abs(transaction.amount);
+          expenseAmounts.push(Math.abs(transaction.amount));
         }
+      }
+    });
 
-        // Agregar nueva transacción
-        function addTransaction(e) {
-            e.preventDefault();
+    document.getElementById('monthly-income').textContent = `S/ ${monthlyIncome.toFixed(2)}`;
+    document.getElementById('monthly-expense').textContent = `S/ ${monthlyExpense.toFixed(2)}`;
+    document.getElementById('total-balance').textContent = `S/ ${totalBalance.toFixed(2)}`;
+    document.getElementById('transaction-count').textContent = transactions.length;
 
-            const amount = parseFloat(document.getElementById('amount').value);
-            const description = document.getElementById('description').value.trim();
-            const category = document.getElementById('category').value;
-            const type = document.getElementById('type').value;
-            const date = document.getElementById('date').value;
+    const avgExpense = expenseAmounts.length > 0
+      ? expenseAmounts.reduce((a, b) => a + b, 0) / expenseAmounts.length
+      : 0;
+    document.getElementById('avg-expense').textContent = `S/ ${avgExpense.toFixed(2)}`;
 
-            if (!amount || !description || !category || !type || !date) {
-                alert('Por favor, complete todos los campos');
-                return;
-            }
+    const biggestExpense = expenseAmounts.length > 0 ? Math.max(...expenseAmounts) : 0;
+    document.getElementById('biggest-expense').textContent = `S/ ${biggestExpense.toFixed(2)}`;
 
-            const transaction = {
-                id: Date.now(),
-                amount: type === 'gasto' ? -Math.abs(amount) : Math.abs(amount),
-                description,
-                category,
-                type,
-                date
-            };
+    const daysLeft = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate() - new Date().getDate();
+    document.getElementById('days-left').textContent = daysLeft;
+  }
 
-            transactions.unshift(transaction); // Agregar al inicio
-            saveTransactions();
-            
-            // Limpiar formulario
-            e.target.reset();
-            setTodayDate();
-            
-            // Actualizar interfaz
-            applyFilters();
-            updateSummary();
-            
-            // Animación de éxito
-            showSuccessMessage('Transacción agregada exitosamente');
-        }
+  // Funciones utilitarias
+  function getCategoryEmoji(category) {
+    const emojis = {
+      alimentacion: '🍽️',
+      transporte: '🚗',
+      salud: '🏥',
+      educacion: '📚',
+      entretenimiento: '🎬',
+      servicios: '⚡',
+      ropa: '👕',
+      hogar: '🏠',
+      trabajo: '💼',
+      otros: '📦'
+    };
+    return emojis[category] || '📦';
+  }
 
-        // Eliminar transacción
-        function deleteTransaction(id) {
-            if (confirm('¿Estás seguro de que deseas eliminar esta transacción?')) {
-                transactions = transactions.filter(t => t.id !== id);
-                saveTransactions();
-                applyFilters();
-                updateSummary();
-                showSuccessMessage('Transacción eliminada');
-            }
-        }
+  function formatDate(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('es-ES', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  }
 
-        // Aplicar filtros
-        function applyFilters() {
-            const typeFilter = document.getElementById('filter-type').value;
-            const categoryFilter = document.getElementById('filter-category').value;
-            const monthFilter = document.getElementById('filter-month').value;
+  function showSuccessMessage(message) {
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: linear-gradient(135deg, #27ae60, #2ecc71);
+      color: white;
+      padding: 15px 20px;
+      border-radius: 10px;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+      z-index: 1000;
+      animation: slideIn 0.3s ease;
+    `;
+    notification.innerHTML = `<i class="fas fa-check-circle"></i> ${message}`;
 
-            filteredTransactions = transactions.filter(transaction => {
-                const matchesType = !typeFilter || transaction.type === typeFilter;
-                const matchesCategory = !categoryFilter || transaction.category === categoryFilter;
-                const matchesMonth = !monthFilter || transaction.date.startsWith(monthFilter);
-                
-                return matchesType && matchesCategory && matchesMonth;
-            });
+    document.body.appendChild(notification);
 
-            renderTransactions();
-        }
+    setTimeout(() => {
+      notification.style.animation = 'slideOut 0.3s ease';
+      setTimeout(() => notification.remove(), 300);
+    }, 3000);
+  }
 
-        // Renderizar transacciones
-        function renderTransactions() {
-            const tbody = document.getElementById('transactions-body');
-            const noTransactions = document.getElementById('no-transactions');
-
-            if (filteredTransactions.length === 0) {
-                tbody.innerHTML = '';
-                noTransactions.style.display = 'block';
-                return;
-            }
-
-            noTransactions.style.display = 'none';
-            tbody.innerHTML = '';
-
-            filteredTransactions.forEach(transaction => {
-                const row = document.createElement('tr');
-                row.className = 'fade-in';
-                
-                const categoryEmoji = getCategoryEmoji(transaction.category);
-                const typeClass = transaction.type === 'ingreso' ? 'type-ingreso' : 'type-gasto';
-                const amountClass = transaction.amount >= 0 ? 'amount-positive' : 'amount-negative';
-                
-                row.innerHTML = `
-                    <td>${formatDate(transaction.date)}</td>
-                    <td><span class="type-badge ${typeClass}">${transaction.type}</span></td>
-                    <td>${categoryEmoji} ${transaction.category}</td>
-                    <td>${transaction.description}</td>
-                    <td class="${amountClass}">S/ ${Math.abs(transaction.amount).toFixed(2)}</td>
-                    <td>
-                        <button class="btn btn-delete" onclick="deleteTransaction(${transaction.id})">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </td>
-                `;
-                
-                tbody.appendChild(row);
-            });
-        }
-
-        // Actualizar resumen
-        function updateSummary() {
-            const currentMonth = new Date().toISOString().slice(0, 7);
-            
-            let monthlyIncome = 0;
-            let monthlyExpense = 0;
-            let totalBalance = 0;
-            let expenseAmounts = [];
-
-            transactions.forEach(transaction => {
-                const transactionMonth = transaction.date.slice(0, 7);
-                
-                totalBalance += transaction.amount;
-                
-                if (transactionMonth === currentMonth) {
-                    if (transaction.amount > 0) {
-                        monthlyIncome += transaction.amount;
-                    } else {
-                        monthlyExpense += Math.abs(transaction.amount);
-                        expenseAmounts.push(Math.abs(transaction.amount));
-                    }
-                }
-            });
-
-            // Actualizar tarjetas principales
-            document.getElementById('monthly-income').textContent = `S/ ${monthlyIncome.toFixed(2)}`;
-            document.getElementById('monthly-expense').textContent = `S/ ${monthlyExpense.toFixed(2)}`;
-            document.getElementById('total-balance').textContent = `S/ ${totalBalance.toFixed(2)}`;
-
-            // Actualizar estadísticas
-            document.getElementById('transaction-count').textContent = transactions.length;
-            
-            const avgExpense = expenseAmounts.length > 0 
-                ? expenseAmounts.reduce((a, b) => a + b, 0) / expenseAmounts.length 
-                : 0;
-            document.getElementById('avg-expense').textContent = `S/ ${avgExpense.toFixed(2)}`;
-            
-            const biggestExpense = expenseAmounts.length > 0 ? Math.max(...expenseAmounts) : 0;
-            document.getElementById('biggest-expense').textContent = `S/ ${biggestExpense.toFixed(2)}`;
-            
-            const daysLeft = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate() - new Date().getDate();
-            document.getElementById('days-left').textContent = daysLeft;
-        }
-
-        // Funciones utilitarias
-        function getCategoryEmoji(category) {
-            const emojis = {
-                alimentacion: '🍽️',
-                transporte: '🚗',
-                salud: '🏥',
-                educacion: '📚',
-                entretenimiento: '🎬',
-                servicios: '⚡',
-                ropa: '👕',
-                hogar: '🏠',
-                trabajo: '💼',
-                otros: '📦'
-            };
-            return emojis[category] || '📦';
-        }
-
-        function formatDate(dateString) {
-            const date = new Date(dateString);
-            return date.toLocaleDateString('es-ES', {
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric'
-            });
-        }
-
-        function showSuccessMessage(message) {
-            // Crear elemento de notificación
-            const notification = document.createElement('div');
-            notification.style.cssText = `
-                position: fixed;
-                top: 20px;
-                right: 20px;
-                background: linear-gradient(135deg, #27ae60, #2ecc71);
-                color: white;
-                padding: 15px 20px;
-                border-radius: 10px;
-                box-shadow: 0 5px 15px rgba(0,0,0,0.2);
-                z-index: 1000;
-                animation: slideIn 0.3s ease;
-            `;
-            notification.innerHTML = `<i class="fas fa-check-circle"></i> ${message}`;
-            
-            document.body.appendChild(notification);
-            
-            // Remover después de 3 segundos
-            setTimeout(() => {
-                notification.style.animation = 'slideOut 0.3s ease';
-                setTimeout(() => notification.remove(), 300);
-            }, 3000);
-        }
-
-        // Inicializar filtros con datos actuales
-        filteredTransactions = transactions;
-    </script>
+  // Exponer deleteTransaction al ámbito global
+  window.deleteTransaction = deleteTransaction;
+</script>
 
     <style>
         @keyframes slideIn {
